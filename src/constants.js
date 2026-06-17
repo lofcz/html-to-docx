@@ -210,6 +210,35 @@ const colorlessColors = ['transparent', 'auto'];
 const verticalAlignValues = ['top', 'middle', 'bottom'];
 const defaultPercentageMarginValue = 0;
 
+/**
+ * CSS absolute font-size keyword mappings to pixel values.
+ * Per CSS spec, these scale against the document's default (medium = 16px).
+ * Reference: https://developer.mozilla.org/en-US/docs/Web/CSS/font-size
+ */
+const absoluteFontSizes = {
+  'xx-small': '9px',
+  'x-small': '10px',
+  small: '13px',
+  medium: '16px',
+  large: '18px',
+  'x-large': '24px',
+  'xx-large': '32px',
+  'xxx-large': '48px',
+};
+
+/**
+ * Scaling factors for CSS relative font-size keywords.
+ * - smaller: 5/6 of the *inherited* font size
+ * - larger:  6/5 (1.2x) of the *inherited* font size
+ * These resolve against the nearest ancestor's font-size, NOT the document
+ * default - which is the bug fixed here (previously they fell back to the
+ * document default, producing wrong point sizes for nested elements).
+ */
+const relativeFontSizeFactors = {
+  smaller: 5 / 6,
+  larger: 6 / 5,
+};
+
 export {
   defaultDocumentOptions,
   defaultHeadingOptions,
@@ -244,4 +273,6 @@ export {
   defaultPercentageMarginValue,
   defaultTableBorderAttributeOptions,
   SVG_UNIT_TO_PIXEL_CONVERSIONS,
+  absoluteFontSizes,
+  relativeFontSizeFactors,
 };

@@ -55,6 +55,8 @@ import {
   internalRelationship,
   defaultTableBorderOptions,
   defaultTableBorderAttributeOptions,
+  absoluteFontSizes,
+  relativeFontSizeFactors,
 } from '../constants';
 import { vNodeHasChildren } from '../utils/vnode';
 import { isValidUrl } from '../utils/url';
@@ -363,6 +365,19 @@ const fixupLineHeight = (lineHeight, fontSize) => {
   }
 };
 
+// Returns the nearest ancestor's resolved font-size (in half-points), falling
+// back to the document instance default, and finally to the global default
+// (22 half-points = 11pt) when the docxDocumentInstance is unavailable - some
+// render paths (e.g. certain table-cell contexts) invoke the builders without
+// one, so this must be defensive.
+const getInheritedFontSize = (docxDocumentInstance) => {
+  const stack = docxDocumentInstance?.inheritedFontSizeStack;
+  if (Array.isArray(stack) && stack.length > 0) {
+    return stack[stack.length - 1];
+  }
+  return docxDocumentInstance?.fontSize ?? 22;
+};
+
 // eslint-disable-next-line consistent-return
 const fixupFontSize = (fontSizeString, docxDocumentInstance) => {
   if (pointRegex.test(fontSizeString)) {
@@ -380,9 +395,22 @@ const fixupFontSize = (fontSizeString, docxDocumentInstance) => {
     const matchedParts = fontSizeString.match(inchRegex);
     return inchToHIP(matchedParts[1]);
   } else if (percentageRegex.test(fontSizeString)) {
-    // need fontsize here default
+    // Resolve against the *inherited* (nearest ancestor) font-size, not the
+    // document default, so nested percentage sizing matches browser behavior.
     const matchedParts = fontSizeString.match(percentageRegex);
-    return (matchedParts[1] * docxDocumentInstance.fontSize) / 100;
+    return (matchedParts[1] * getInheritedFontSize(docxDocumentInstance)) / 100;
+  } else if (absoluteFontSizes[fontSizeString]) {
+    // CSS absolute keywords (xx-small ... xxx-large) map to fixed px values,
+    // then convert to half-points.
+    const px = absoluteFontSizes[fontSizeString];
+    const matchedParts = px.match(pixelRegex);
+    return pixelToHIP(matchedParts[1]);
+  } else if (relativeFontSizeFactors[fontSizeString]) {
+    // CSS relative keywords resolve against the nearest ancestor's font-size,
+    // never the document default - this is the fix for the font-inheritance bug.
+    return Math.round(
+      relativeFontSizeFactors[fontSizeString] * getInheritedFontSize(docxDocumentInstance)
+    );
   }
 };
 
@@ -1009,12 +1037,29 @@ const buildRun = async (vNode, attributes, docxDocumentInstance) => {
             { ...attributes, ...tempAttributes }
           );
 
-          // eslint-disable-next-line no-use-before-define
-          const spanFragment = await buildRunOrRuns(
-            tempVNode,
-            modifiedAttributes,
-            docxDocumentInstance
-          );
+          // A span may establish its own font-size; push it so children with
+          // smaller/larger/percentage inherit from this span, then pop.
+          const spanInheritedStack = docxDocumentInstance?.inheritedFontSizeStack;
+          const spanPushedFontSize =
+            Array.isArray(spanInheritedStack) &&
+            typeof modifiedAttributes.fontSize === 'number' &&
+            !Number.isNaN(modifiedAttributes.fontSize);
+          if (spanPushedFontSize) {
+            spanInheritedStack.push(modifiedAttributes.fontSize);
+          }
+          let spanFragment;
+          try {
+            // eslint-disable-next-line no-use-before-define
+            spanFragment = await buildRunOrRuns(
+              tempVNode,
+              modifiedAttributes,
+              docxDocumentInstance
+            );
+          } finally {
+            if (spanPushedFontSize) {
+              spanInheritedStack.pop();
+            }
+          }
 
           // if spanFragment is an array, we need to add each fragment to the runFragmentsArray. If the fragment is an array, perform a depth first search on the array to add each fragment to the runFragmentsArray
           if (Array.isArray(spanFragment)) {
@@ -1196,18 +1241,29 @@ const buildRunOrRuns = async (vNode, attributes, docxDocumentInstance) => {
   if ((isVNode(vNode) || vNode?.isCoveringNode) && vNode.tagName === 'span' && vNode.children) {
     let runFragments = [];
 
-    for (let index = 0; index < vNode.children.length; index++) {
-      const childVNode = vNode.children[index];
+    // Resolve this span's own styles once, then push its font-size so nested
+    // spans/inline elements resolve relative keywords + percentages against it.
+    const modifiedAttributes = modifiedStyleAttributesBuilder(
+      docxDocumentInstance,
+      vNode,
+      attributes
+    );
+    const spanStack = docxDocumentInstance?.inheritedFontSizeStack;
+    const spanPushed =
+      Array.isArray(spanStack) &&
+      typeof modifiedAttributes.fontSize === 'number' &&
+      !Number.isNaN(modifiedAttributes.fontSize);
+    if (spanPushed) {
+      spanStack.push(modifiedAttributes.fontSize);
+    }
 
-      const modifiedAttributes = modifiedStyleAttributesBuilder(
-        docxDocumentInstance,
-        vNode,
-        attributes
-      );
+    try {
+      for (let index = 0; index < vNode.children.length; index++) {
+        const childVNode = vNode.children[index];
 
-      const tempRunFragments = await buildRunOrHyperLink(
-        childVNode,
-        isVNode(childVNode) && childVNode.tagName === 'img'
+        const tempRunFragments = await buildRunOrHyperLink(
+          childVNode,
+          isVNode(childVNode) && childVNode.tagName === 'img'
           ? { ...modifiedAttributes, type: 'picture', description: childVNode.properties.alt }
           : modifiedAttributes,
         docxDocumentInstance
@@ -1218,6 +1274,11 @@ const buildRunOrRuns = async (vNode, attributes, docxDocumentInstance) => {
     }
 
     return runFragments;
+    } finally {
+      if (spanPushed) {
+        spanStack.pop();
+      }
+    }
   } else {
     const tempRunFragments = await buildRun(vNode, attributes, docxDocumentInstance);
     return tempRunFragments;
@@ -1745,6 +1806,18 @@ const buildParagraph = async (vNode, attributes, docxDocumentInstance) => {
       isParagraph: true,
     }
   );
+  // Push this paragraph's resolved font-size onto the inherited stack so that
+  // descendant runs/spans with CSS relative keywords (smaller/larger) or
+  // percentage sizing resolve against it rather than the document default.
+  const inheritedStack = docxDocumentInstance?.inheritedFontSizeStack;
+  const pushedFontSize =
+    Array.isArray(inheritedStack) &&
+    typeof modifiedAttributes.fontSize === 'number' &&
+    !Number.isNaN(modifiedAttributes.fontSize);
+  if (pushedFontSize) {
+    inheritedStack.push(modifiedAttributes.fontSize);
+  }
+  try {
   // IMAGE SPACING FIX: Ensure proper spacing for paragraphs containing images
   // Images in paragraphs need specific spacing attributes to render correctly in DOCX
   if (isVNode(vNode) && vNode.children && vNode.children.some((child) => child.tagName === 'img')) {
@@ -1901,6 +1974,11 @@ const buildParagraph = async (vNode, attributes, docxDocumentInstance) => {
   paragraphFragment.up();
 
   return paragraphFragment;
+  } finally {
+    if (pushedFontSize) {
+      inheritedStack.pop();
+    }
+  }
 };
 
 const buildGridSpanFragment = (spanValue) =>

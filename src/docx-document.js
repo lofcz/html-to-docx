@@ -212,6 +212,13 @@ class DocxDocument {
     this.footerObjects = [];
     this.documentXML = null;
 
+    // Inherited font-size stack (values in half-points, matching `this.fontSize`).
+    // Tracks the resolved font-size of ancestor elements so that CSS relative
+    // keywords (`smaller`, `larger`) and percentage font-sizes resolve against the
+    // nearest ancestor's size rather than the document default. Seeded with the
+    // document default so top-level elements inherit it.
+    this.inheritedFontSizeStack = [this.fontSize];
+
     this.generateContentTypesXML = this.generateContentTypesXML.bind(this);
     this.generateDocumentXML = this.generateDocumentXML.bind(this);
     this.generateCoreXML = this.generateCoreXML.bind(this);
