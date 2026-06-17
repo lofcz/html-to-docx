@@ -1,48 +1,74 @@
-# This workflow runs comprehensive tests and publishes the package to npm when a GitHub release is created
-# For more information see: https://docs.github.com/en/actions/publishing-packages/publishing-nodejs-packages
+name: Release and Publish to npm
 
-name: TurboDocx NPM Release - Node.js Package
+# Trusted publishing (npm provenance / OIDC). Requires no npm_token secret:
+# the @lofcz scope on npm is configured to trust this GitHub repo. Ensure the
+# workflow has both `contents: write` (tag/commit push, GitHub release) and
+# `id-token: write` (provenance) permissions, set below.
 
 on:
-  release:
-    types: [created]  # Trigger when a new release is published on GitHub
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: Release type
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
 
 jobs:
-  # Run all test suites to validate the release before publishing
-  build:
+  release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+
     steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-node@v5
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          node-version: 24
+          fetch-depth: 0
 
-      # Install dependencies with clean install (respects package-lock.json exactly)
-      - run: npm ci
-
-      # Run all test suites: unit tests, integration tests, heading styles examples, and TypeScript tests
-      - run: npm run test:all
-
-  # Publish the package to npm registry (only runs if build job passes)
-  publish-npm:
-    needs: build  # Wait for tests to pass before publishing
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-node@v5
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: 24
-          registry-url: https://registry.npmjs.org/  # Configure npm registry for publishing
+          node-version: "lts/*"
+          registry-url: "https://registry.npmjs.org"
+          cache: "npm"
 
-      # Install dependencies
-      - run: npm ci
+      - name: Install dependencies
+        run: npm ci
 
-      # Build the production bundle (bundles modules, minifies code with terser)
-      - run: npm run build:prod
+      - name: Run unit tests (jest)
+        run: npm run test:unit
 
-      # Publish to npm with public access (scoped packages are private by default)
-      - run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{secrets.npm_token}}  # Use npm token from GitHub secrets
+      - name: Build (production)
+        run: npm run build:prod
+
+      - name: Bump package version
+        id: version
+        run: |
+          npm version "${{ github.event.inputs.release_type }}" --no-git-tag-version
+          echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Commit release version and create tag
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add package.json
+          git commit -m "chore: release v${{ steps.version.outputs.version }}"
+          git tag -a "v${{ steps.version.outputs.version }}" -m "Release v${{ steps.version.outputs.version }}"
+
+      - name: Publish to npm
+        run: npm publish --provenance --access public
+
+      - name: Push release commit and tag
+        run: git push --follow-tags
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          generate_release_notes: true
