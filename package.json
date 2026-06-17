@@ -1,7 +1,7 @@
 {
-  "name": "@turbodocx/html-to-docx",
+  "name": "@lofcz/html-to-docx",
   "version": "1.23.0",
-  "description": "HTML to DOCX converter",
+  "description": "HTML to DOCX converter (lofcz fork with CSS stylesheet support, font-size keyword/inheritance fixes, and probe-image-size)",
   "keywords": [
     "html-to-docx",
     "html to docx",
@@ -63,8 +63,6 @@
   "types": "index.d.ts",
   "files": [
     "dist",
-    "scripts/postinstall.js",
-    "scripts/messages.json",
     "index.d.ts",
     "README.md",
     "LICENSE"
@@ -95,14 +93,13 @@
     "build:browser:prod": "cross-env NODE_ENV=production BUILD_TARGET=browser rollup -c",
     "diff:docx": "node scripts/diff-docx.js",
     "prepare": "husky install",
-    "postinstall": "node scripts/postinstall.js",
     "test:ts-example": "npm run build && cross-env TS_NODE_PROJECT=example/typescript/tsconfig.json ts-node -r tsconfig-paths/register example/typescript/typescript-example.ts"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/turbodocx/html-to-docx.git"
+    "url": "git+https://github.com/lofcz/html-to-docx.git"
   },
-  "author": "TurboDocx, Inc.",
+  "author": "lofcz (fork of TurboDocx, Inc.)",
   "contributors": [
     "amrita-syn <amrita.yadav@synapsica.com>",
     "charuthaB <charutha.bhaskar@synapsica.com>",
@@ -137,9 +134,12 @@
   ],
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/TurboDocx/html-to-docx/issues"
+    "url": "https://github.com/lofcz/html-to-docx/issues"
   },
-  "homepage": "https://github.com/TurboDocx/html-to-docx#readme",
+  "homepage": "https://github.com/lofcz/html-to-docx#readme",
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=20.0.0"
   },
